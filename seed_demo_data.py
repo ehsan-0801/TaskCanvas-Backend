@@ -31,10 +31,11 @@ PRIORITIES = ["low", "medium", "high"]
 
 
 def make_user(email, password, first_name=""):
-    """Create-or-update a user keyed by email (used as the username)."""
-    user, _ = User.objects.get_or_create(
-        username=email, defaults={"email": email, "first_name": first_name}
-    )
+    """Create-or-update a user, looked up by email so we never create a second
+    account for the same address (login resolves users by email)."""
+    user = User.objects.filter(email__iexact=email).order_by("id").first()
+    if user is None:
+        user = User.objects.create(username=email, email=email)
     user.email = email
     if first_name:
         user.first_name = first_name
