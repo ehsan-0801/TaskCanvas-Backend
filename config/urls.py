@@ -20,12 +20,17 @@ from django.contrib import admin
 from django.urls import include, path
 from rest_framework_simplejwt.views import TokenRefreshView
 
-from auth_app.views import EmailTokenObtainPairView
+from auth_app.views import EmailTokenObtainPairView, RegisterView
+from tasks.views import TagViewSet
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('api/auth/register/', RegisterView.as_view(), name='register'),
     path('api/auth/login/', EmailTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/auth/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    path('api/', include('teams.urls')),
+    path('api/tags/', TagViewSet.as_view({'get': 'list', 'post': 'create'}), name='tag-list'),
+    path('api/tags/<int:pk>/', TagViewSet.as_view({'delete': 'destroy'}), name='tag-detail'),
     path('api/tasks/', include('tasks.urls')),
     path('api/images/', include('annotation.urls')),
 ]

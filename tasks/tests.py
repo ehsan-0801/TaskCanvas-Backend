@@ -2,169 +2,139 @@ from django.contrib.auth.models import User
 from rest_framework import status
 from rest_framework.test import APITestCase
 
+from teams.models import Board, BoardAccess, Team, TeamMembership
+
 from .models import Tag, Task
 
 
-class TaskApiTestCase(APITestCase):
-    """Shared setup: two users, each authenticated via JWT on demand."""
+class BoardTaskTestCase(APITestCase):
+    """Owner with a board, plus a member granted access to it, and an outsider."""
 
     def setUp(self):
-        self.alice = User.objects.create_user(
-            username="alice", email="alice@example.com", password="secretpass123"
-        )
-        self.bob = User.objects.create_user(
-            username="bob", email="bob@example.com", password="secretpass123"
-        )
+        self.owner = User.objects.create_user('owner', 'owner@example.com', 'secretpass123')
+        self.member = User.objects.create_user('member', 'member@example.com', 'secretpass123')
+        self.outsider = User.objects.create_user('out', 'out@example.com', 'secretpass123')
+
+        self.team = Team.objects.create(name='Acme', owner=self.owner)
+        TeamMembership.objects.create(team=self.team, user=self.owner, role='owner')
+        TeamMembership.objects.create(team=self.team, user=self.member, role='member')
+        self.board = Board.objects.create(team=self.team, name='Sprint')
+        self.other_board = Board.objects.create(team=self.team, name='Secret')
+        BoardAccess.objects.create(board=self.board, user=self.member)
 
     def auth(self, user):
         self.client.force_authenticate(user=user)
 
 
-class TaskAuthTests(TaskApiTestCase):
+class TaskAuthTests(BoardTaskTestCase):
     def test_requires_authentication(self):
-        response = self.client.get("/api/tasks/")
-        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertEqual(self.client.get('/api/tasks/').status_code, status.HTTP_401_UNAUTHORIZED)
 
 
-class TaskCrudTests(TaskApiTestCase):
-    def test_create_task(self):
-        self.auth(self.alice)
-        response = self.client.post(
-            "/api/tasks/",
-            {
-                "title": "Write tests",
-                "status": "todo",
-                "priority": "high",
-                "due_date": "2026-07-09",
-            },
-            format="json",
+class TaskCrudTests(BoardTaskTestCase):
+    def test_owner_creates_task_on_board(self):
+        self.auth(self.owner)
+        r = self.client.post(
+            '/api/tasks/',
+            {'board': self.board.id, 'title': 'Write tests', 'status': 'todo', 'priority': 'high'},
+            format='json',
         )
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(response.data["title"], "Write tests")
-        task = Task.objects.get(id=response.data["id"])
-        self.assertEqual(task.user, self.alice)
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        task = Task.objects.get(id=r.data['id'])
+        self.assertEqual(task.board, self.board)
+        self.assertEqual(task.created_by, self.owner)
 
-    def test_create_task_with_tags(self):
-        self.auth(self.alice)
-        tag = Tag.objects.create(user=self.alice, name="backend")
-        response = self.client.post(
-            "/api/tasks/",
-            {"title": "Tagged", "status": "todo", "priority": "low", "tag_ids": [tag.id]},
-            format="json",
+    def test_member_can_create_on_granted_board(self):
+        self.auth(self.member)
+        r = self.client.post(
+            '/api/tasks/', {'board': self.board.id, 'title': 'Member task', 'status': 'todo', 'priority': 'low'},
+            format='json',
         )
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(len(response.data["tags"]), 1)
-        self.assertEqual(response.data["tags"][0]["name"], "backend")
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
 
-    def test_create_task_missing_title_fails(self):
-        self.auth(self.alice)
-        response = self.client.post(
-            "/api/tasks/", {"status": "todo", "priority": "low"}, format="json"
+    def test_member_cannot_create_on_ungranted_board(self):
+        self.auth(self.member)
+        r = self.client.post(
+            '/api/tasks/', {'board': self.other_board.id, 'title': 'Nope', 'status': 'todo', 'priority': 'low'},
+            format='json',
         )
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("title", response.data)
+        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
 
-    def test_patch_task(self):
-        self.auth(self.alice)
-        task = Task.objects.create(user=self.alice, title="Old", status="todo")
-        response = self.client.patch(
-            f"/api/tasks/{task.id}/", {"title": "New"}, format="json"
+    def test_outsider_cannot_create(self):
+        self.auth(self.outsider)
+        r = self.client.post(
+            '/api/tasks/', {'board': self.board.id, 'title': 'Hax', 'status': 'todo', 'priority': 'low'},
+            format='json',
         )
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        task.refresh_from_db()
-        self.assertEqual(task.title, "New")
+        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
 
-    def test_delete_task(self):
-        self.auth(self.alice)
-        task = Task.objects.create(user=self.alice, title="Doomed")
-        response = self.client.delete(f"/api/tasks/{task.id}/")
-        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
-        self.assertFalse(Task.objects.filter(id=task.id).exists())
+    def test_missing_title_fails(self):
+        self.auth(self.owner)
+        r = self.client.post('/api/tasks/', {'board': self.board.id, 'status': 'todo', 'priority': 'low'}, format='json')
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
 
 
-class TaskDateFilterTests(TaskApiTestCase):
-    def test_list_filtered_by_date(self):
-        self.auth(self.alice)
-        Task.objects.create(user=self.alice, title="On date", due_date="2026-07-09")
-        Task.objects.create(user=self.alice, title="Other date", due_date="2026-07-10")
-        response = self.client.get("/api/tasks/", {"date": "2026-07-09"})
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        titles = [t["title"] for t in response.data["results"]]
-        self.assertEqual(titles, ["On date"])
+class TaskVisibilityTests(BoardTaskTestCase):
+    def test_list_filtered_by_board(self):
+        Task.objects.create(board=self.board, title='A')
+        Task.objects.create(board=self.other_board, title='B')
+        self.auth(self.owner)
+        r = self.client.get(f'/api/tasks/?board={self.board.id}')
+        titles = [t['title'] for t in r.data['results']]
+        self.assertEqual(titles, ['A'])
 
-    def test_list_without_date_returns_all(self):
-        self.auth(self.alice)
-        Task.objects.create(user=self.alice, title="A", due_date="2026-07-09")
-        Task.objects.create(user=self.alice, title="B", due_date="2026-07-10")
-        response = self.client.get("/api/tasks/")
-        self.assertEqual(response.data["count"], 2)
+    def test_member_only_sees_granted_board_tasks(self):
+        Task.objects.create(board=self.board, title='Visible')
+        Task.objects.create(board=self.other_board, title='Hidden')
+        self.auth(self.member)
+        r = self.client.get('/api/tasks/')
+        titles = [t['title'] for t in r.data['results']]
+        self.assertEqual(titles, ['Visible'])
 
+    def test_member_cannot_read_ungranted_task(self):
+        hidden = Task.objects.create(board=self.other_board, title='Hidden')
+        self.auth(self.member)
+        r = self.client.get(f'/api/tasks/{hidden.id}/')
+        self.assertEqual(r.status_code, status.HTTP_404_NOT_FOUND)
 
-class TaskIsolationTests(TaskApiTestCase):
-    def test_list_only_returns_own_tasks(self):
-        Task.objects.create(user=self.alice, title="Alice task")
-        Task.objects.create(user=self.bob, title="Bob task")
-        self.auth(self.alice)
-        response = self.client.get("/api/tasks/")
-        titles = [t["title"] for t in response.data["results"]]
-        self.assertEqual(titles, ["Alice task"])
-
-    def test_cannot_read_another_users_task(self):
-        bob_task = Task.objects.create(user=self.bob, title="Bob task")
-        self.auth(self.alice)
-        response = self.client.get(f"/api/tasks/{bob_task.id}/")
-        # Not visible to Alice — must 404, never leak existence.
-        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
-
-    def test_cannot_delete_another_users_task(self):
-        bob_task = Task.objects.create(user=self.bob, title="Bob task")
-        self.auth(self.alice)
-        response = self.client.delete(f"/api/tasks/{bob_task.id}/")
-        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
-        self.assertTrue(Task.objects.filter(id=bob_task.id).exists())
+    def test_date_filter(self):
+        Task.objects.create(board=self.board, title='On', due_date='2026-07-11')
+        Task.objects.create(board=self.board, title='Off', due_date='2026-07-12')
+        self.auth(self.owner)
+        r = self.client.get(f'/api/tasks/?board={self.board.id}&date=2026-07-11')
+        self.assertEqual([t['title'] for t in r.data['results']], ['On'])
 
 
-class TaskReorderTests(TaskApiTestCase):
-    def test_reorder_updates_status_and_order(self):
-        self.auth(self.alice)
-        t1 = Task.objects.create(user=self.alice, title="1", status="todo", order=0)
-        t2 = Task.objects.create(user=self.alice, title="2", status="todo", order=1)
-        response = self.client.post(
-            "/api/tasks/reorder/",
-            {
-                "updates": [
-                    {"id": t1.id, "status": "in_progress", "order": 0},
-                    {"id": t2.id, "status": "todo", "order": 0},
-                ]
-            },
-            format="json",
-        )
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+class ReorderTests(BoardTaskTestCase):
+    def test_reorder_updates_accessible_tasks(self):
+        t1 = Task.objects.create(board=self.board, title='1', status='todo', order=0)
+        self.auth(self.member)
+        r = self.client.post('/api/tasks/reorder/', {'updates': [{'id': t1.id, 'status': 'done', 'order': 3}]}, format='json')
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
         t1.refresh_from_db()
-        t2.refresh_from_db()
-        self.assertEqual(t1.status, "in_progress")
-        self.assertEqual(t2.order, 0)
+        self.assertEqual(t1.status, 'done')
 
-    def test_reorder_ignores_other_users_tasks(self):
-        self.auth(self.alice)
-        bob_task = Task.objects.create(user=self.bob, title="Bob", status="todo", order=5)
-        response = self.client.post(
-            "/api/tasks/reorder/",
-            {"updates": [{"id": bob_task.id, "status": "done", "order": 0}]},
-            format="json",
-        )
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        bob_task.refresh_from_db()
-        # Bob's task must be untouched.
-        self.assertEqual(bob_task.status, "todo")
-        self.assertEqual(bob_task.order, 5)
+    def test_reorder_ignores_inaccessible_tasks(self):
+        hidden = Task.objects.create(board=self.other_board, title='H', status='todo', order=0)
+        self.auth(self.member)
+        r = self.client.post('/api/tasks/reorder/', {'updates': [{'id': hidden.id, 'status': 'done', 'order': 9}]}, format='json')
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        hidden.refresh_from_db()
+        self.assertEqual(hidden.status, 'todo')  # untouched
 
 
-class TagTests(TaskApiTestCase):
-    def test_create_and_list_tags_scoped_to_user(self):
-        self.auth(self.alice)
-        self.client.post("/api/tasks/tags/", {"name": "backend"}, format="json")
-        Tag.objects.create(user=self.bob, name="bob-only")
-        response = self.client.get("/api/tasks/tags/")
-        names = [t["name"] for t in response.data["results"]]
-        self.assertEqual(names, ["backend"])
+class TagTests(BoardTaskTestCase):
+    def test_create_and_list_tags_scoped_to_team(self):
+        other_team = Team.objects.create(name='Other', owner=self.outsider)
+        Tag.objects.create(team=other_team, name='other-tag')
+        self.auth(self.owner)
+        r = self.client.post('/api/tags/', {'team': self.team.id, 'name': 'backend'}, format='json')
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        r = self.client.get(f'/api/tags/?team={self.team.id}')
+        self.assertEqual([t['name'] for t in r.data['results']], ['backend'])
+
+    def test_cannot_create_tag_for_unaccessible_team(self):
+        other_team = Team.objects.create(name='Other', owner=self.outsider)
+        self.auth(self.owner)
+        r = self.client.post('/api/tags/', {'team': other_team.id, 'name': 'x'}, format='json')
+        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)

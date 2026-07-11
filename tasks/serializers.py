@@ -6,7 +6,8 @@ from .models import Tag, Task
 class TagSerializer(serializers.ModelSerializer):
     class Meta:
         model = Tag
-        fields = ["id", "name"]
+        fields = ["id", "name", "team"]
+        read_only_fields = ["id"]
 
 
 class TaskSerializer(serializers.ModelSerializer):
@@ -22,6 +23,7 @@ class TaskSerializer(serializers.ModelSerializer):
         model = Task
         fields = [
             "id",
+            "board",
             "title",
             "description",
             "status",
@@ -43,6 +45,8 @@ class TaskSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         tag_ids = validated_data.pop("tag_ids", None)
+        # board is fixed once a task is created — ignore attempts to move it.
+        validated_data.pop("board", None)
         task = super().update(instance, validated_data)
         if tag_ids is not None:
             task.tags.set(tag_ids)

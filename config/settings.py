@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     'cloudinary_storage',
     'cloudinary',
     'auth_app',
+    'teams',
     'tasks',
     'annotation',
 ]

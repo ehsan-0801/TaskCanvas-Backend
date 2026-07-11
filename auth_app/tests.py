@@ -72,3 +72,21 @@ class AuthTests(APITestCase):
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_register_creates_user_and_returns_tokens(self):
+        response = self.client.post(
+            "/api/auth/register/",
+            {"email": "new@example.com", "password": "freshpass123", "name": "New"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertIn("access", response.data)
+        self.assertTrue(User.objects.filter(email="new@example.com").exists())
+
+    def test_register_rejects_duplicate_email(self):
+        response = self.client.post(
+            "/api/auth/register/",
+            {"email": "alice@example.com", "password": "freshpass123"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)

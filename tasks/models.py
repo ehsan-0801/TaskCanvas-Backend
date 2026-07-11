@@ -3,7 +3,7 @@ from django.db import models
 
 
 class Tag(models.Model):
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='tags')
+    team = models.ForeignKey('teams.Team', on_delete=models.CASCADE, related_name='tags')
     name = models.CharField(max_length=50)
 
     class Meta:
@@ -26,7 +26,14 @@ class Task(models.Model):
         ('high', 'High'),
     ]
 
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='tasks')
+    board = models.ForeignKey('teams.Board', on_delete=models.CASCADE, related_name='tasks')
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_tasks',
+    )
     title = models.CharField(max_length=200)
     description = models.TextField(blank=True, default='')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='todo')
