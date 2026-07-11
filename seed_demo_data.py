@@ -1,4 +1,6 @@
+import calendar
 import os
+from datetime import date
 
 import django
 
@@ -12,77 +14,120 @@ from teams.models import Board, BoardAccess, Team, TeamMembership
 
 User = get_user_model()
 
-# --- Demo owner --------------------------------------------------------------
-owner, _ = User.objects.get_or_create(
-    username='demo',
-    defaults={'email': 'demo@example.com', 'first_name': 'Demo', 'last_name': 'User'},
+# A rotating set of realistic task titles for the month's To Do column.
+TASK_TEMPLATES = [
+    "Plan the sprint",
+    "Review pull requests",
+    "Write documentation",
+    "Fix reported bugs",
+    "Design review",
+    "Team standup notes",
+    "Update dependencies",
+    "Refine the backlog",
+    "Customer feedback triage",
+    "Prepare the demo",
+]
+PRIORITIES = ["low", "medium", "high"]
+
+
+def make_user(email, password, first_name=""):
+    """Create-or-update a user keyed by email (used as the username)."""
+    user, _ = User.objects.get_or_create(
+        username=email, defaults={"email": email, "first_name": first_name}
+    )
+    user.email = email
+    if first_name:
+        user.first_name = first_name
+    user.set_password(password)
+    user.save()
+    return user
+
+
+def seed_month_of_todos(board, created_by, tags):
+    """Fill a board's To Do column with one task per day of the current month."""
+    today = date.today()
+    year, month = today.year, today.month
+    days_in_month = calendar.monthrange(year, month)[1]
+
+    for day in range(1, days_in_month + 1):
+        due = date(year, month, day)
+        label = TASK_TEMPLATES[(day - 1) % len(TASK_TEMPLATES)]
+        title = f"{label} ({due.strftime('%b %d')})"
+        task, created = Task.objects.get_or_create(
+            board=board,
+            due_date=due,
+            title=title,
+            defaults={
+                "status": "todo",
+                "priority": PRIORITIES[(day - 1) % len(PRIORITIES)],
+                "order": day,
+                "created_by": created_by,
+                "description": "",
+            },
+        )
+        if created and tags:
+            task.tags.set([tags[(day - 1) % len(tags)]])
+
+
+def build_owner(owner_email, owner_password, owner_name, member_specs, team_names):
+    """Create an owner with members, two teams (each with a board of monthly
+    To Do tasks), and grant every member access to every board."""
+    owner = make_user(owner_email, owner_password, owner_name)
+    members = [make_user(email, pw, name) for (email, pw, name) in member_specs]
+
+    for team_name in team_names:
+        team, _ = Team.objects.get_or_create(name=team_name, owner=owner)
+        TeamMembership.objects.get_or_create(team=team, user=owner, defaults={"role": "owner"})
+
+        backend_tag, _ = Tag.objects.get_or_create(team=team, name="backend")
+        frontend_tag, _ = Tag.objects.get_or_create(team=team, name="frontend")
+
+        board, _ = Board.objects.get_or_create(team=team, name=f"{team_name} Board")
+
+        for member in members:
+            TeamMembership.objects.get_or_create(team=team, user=member, defaults={"role": "member"})
+            BoardAccess.objects.get_or_create(board=board, user=member)
+
+        seed_month_of_todos(board, owner, [backend_tag, frontend_tag])
+
+    return owner, members
+
+
+# --- Owner 1 -----------------------------------------------------------------
+build_owner(
+    owner_email="demo@example.com",
+    owner_password="demo12345",
+    owner_name="Demo Owner",
+    member_specs=[
+        ("alice@example.com", "member12345", "Alice"),
+        ("bob@example.com", "member12345", "Bob"),
+        ("carol@example.com", "member12345", "Carol"),
+        ("dave@example.com", "member12345", "Dave"),
+    ],
+    team_names=["Acme Product", "Acme Marketing"],
 )
-owner.set_password('demo12345')
-owner.save()
 
-# --- A second demo user (a teammate) ----------------------------------------
-teammate, _ = User.objects.get_or_create(
-    username='teammate@example.com',
-    defaults={'email': 'teammate@example.com', 'first_name': 'Tess'},
-)
-teammate.set_password('teammate12345')
-teammate.save()
-
-# --- Team + membership -------------------------------------------------------
-team, _ = Team.objects.get_or_create(name='Demo Team', owner=owner)
-TeamMembership.objects.get_or_create(team=team, user=owner, defaults={'role': 'owner'})
-TeamMembership.objects.get_or_create(team=team, user=teammate, defaults={'role': 'member'})
-
-# --- Boards ------------------------------------------------------------------
-board, _ = Board.objects.get_or_create(team=team, name='Product Roadmap')
-design_board, _ = Board.objects.get_or_create(team=team, name='Design Sprint')
-
-# Grant the teammate access to one board only (demonstrates per-board access).
-BoardAccess.objects.get_or_create(board=board, user=teammate)
-
-# --- Tags (team-scoped) ------------------------------------------------------
-backend_tag, _ = Tag.objects.get_or_create(team=team, name='backend')
-frontend_tag, _ = Tag.objects.get_or_create(team=team, name='frontend')
-
-# --- Sample tasks on the first board ----------------------------------------
-Task.objects.get_or_create(
-    board=board,
-    title='Set up authentication',
-    defaults={
-        'description': 'Complete the Django JWT login flow',
-        'status': 'in_progress',
-        'priority': 'high',
-        'due_date': '2026-07-12',
-        'order': 1,
-        'created_by': owner,
-    },
-)
-Task.objects.get_or_create(
-    board=board,
-    title='Review the kanban UI',
-    defaults={
-        'description': 'Check the task board layout and empty states',
-        'status': 'todo',
-        'priority': 'medium',
-        'due_date': '2026-07-12',
-        'order': 2,
-        'created_by': owner,
-    },
-)
-Task.objects.get_or_create(
-    board=board,
-    title='Ship the teams feature',
-    defaults={
-        'description': 'Owner-managed boards with per-board access',
-        'status': 'done',
-        'priority': 'low',
-        'due_date': '2026-07-12',
-        'order': 3,
-        'created_by': owner,
-    },
+# --- Owner 2 -----------------------------------------------------------------
+build_owner(
+    owner_email="owner2@example.com",
+    owner_password="owner212345",
+    owner_name="Second Owner",
+    member_specs=[
+        ("erin@example.com", "member12345", "Erin"),
+        ("frank@example.com", "member12345", "Frank"),
+        ("grace@example.com", "member12345", "Grace"),
+        ("heidi@example.com", "member12345", "Heidi"),
+    ],
+    team_names=["Globex Engineering", "Globex Design"],
 )
 
-print('Seeded:')
-print('  Owner    : demo@example.com / demo12345')
-print('  Teammate : teammate@example.com / teammate12345 (access to "Product Roadmap")')
-print(f'  Team     : {team.name} with boards: Product Roadmap, Design Sprint')
+_days = calendar.monthrange(date.today().year, date.today().month)[1]
+print("Seeded 2 owners, each with 4 members, 2 teams, and a board per team.")
+print(f"Each board holds {_days} To Do tasks (one per day of the current month).")
+print()
+print("Owners:")
+print("  demo@example.com   / demo12345     (teams: Acme Product, Acme Marketing)")
+print("  owner2@example.com / owner212345   (teams: Globex Engineering, Globex Design)")
+print("Members (all): password 'member12345'")
+print("  alice, bob, carol, dave  @example.com   -> Demo Owner's teams")
+print("  erin, frank, grace, heidi @example.com  -> Second Owner's teams")
