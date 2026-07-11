@@ -5,6 +5,9 @@ handles three things: signing people in, running the team task boards, and
 storing image annotations. Everything is JSON over HTTP — the only rendered pages
 are the Django admin. The Next.js frontend does the rest.
 
+Live API: https://taskcanvas-backend-lgo8.onrender.com
+Live app: https://task-canvas-annotate.vercel.app
+
 Frontend repo: https://github.com/ehsan-0801/TaskCanvas-Frontend
 
 ## How the data is shaped
