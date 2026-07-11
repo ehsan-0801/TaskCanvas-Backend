@@ -24,3 +24,7 @@ db.sqlite3-journal
 # OS / editor
 .DS_Store
 *.log
+
+# Docs: keep only README.md under version control, ignore all other markdown
+*.md
+!README.md

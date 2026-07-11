@@ -24,8 +24,14 @@ class PolygonViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
+        # Always scope to the requesting user's polygons. Only the list/create
+        # routes carry an image_id in the URL; the detail routes (patch/delete
+        # via /polygons/<pk>/) do not, so filter by it only when present.
+        queryset = Polygon.objects.filter(image__user=self.request.user)
         image_id = self.kwargs.get('image_id')
-        return Polygon.objects.filter(image__user=self.request.user, image_id=image_id)
+        if image_id is not None:
+            queryset = queryset.filter(image_id=image_id)
+        return queryset
 
     def create(self, request, *args, **kwargs):
         image_id = kwargs.get('image_id')
