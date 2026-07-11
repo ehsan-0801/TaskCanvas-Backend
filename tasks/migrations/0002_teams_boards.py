@@ -15,6 +15,11 @@ def clear_task_data(apps, schema_editor):
 
 class Migration(migrations.Migration):
 
+    # Non-atomic: on Postgres, clearing rows and then adding a NOT NULL column to
+    # the same table in one transaction raises "pending trigger events". Running
+    # each operation in its own transaction lets the delete commit first.
+    atomic = False
+
     dependencies = [
         ('tasks', '0001_initial'),
         ('teams', '0001_initial'),
