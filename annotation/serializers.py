@@ -7,7 +7,7 @@ from .models import AnnotationImage, Polygon
 class PolygonSerializer(serializers.ModelSerializer):
     class Meta:
         model = Polygon
-        fields = ["id", "label", "color", "points", "created_at"]
+        fields = ["id", "label", "color", "points", "label_x", "label_y", "created_at"]
         read_only_fields = ["id", "created_at"]
 
 

@@ -32,6 +32,10 @@ class Polygon(models.Model):
     label = models.CharField(max_length=100, blank=True, default='')
     color = models.CharField(max_length=20, default='#4f46e5')
     points = models.JSONField(default=list)
+    # Where the label sits, normalised 0-1 like the points. Null means "no manual
+    # placement" — the client draws the label at the shape's centre instead.
+    label_x = models.FloatField(null=True, blank=True)
+    label_y = models.FloatField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

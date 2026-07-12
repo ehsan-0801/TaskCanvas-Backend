@@ -154,6 +154,44 @@ class PolygonTests(AnnotationApiTestCase):
         polygon.refresh_from_db()
         self.assertEqual(polygon.points, new_points)
 
+    def test_patch_label_position(self):
+        polygon = Polygon.objects.create(
+            image=self.image, points=[[0.1, 0.1], [0.2, 0.2], [0.3, 0.1]]
+        )
+        self.auth(self.alice)
+        # Placing the label…
+        response = self.client.patch(
+            f"/api/images/polygons/{polygon.id}/",
+            {"label_x": 0.42, "label_y": 0.66},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        polygon.refresh_from_db()
+        self.assertAlmostEqual(polygon.label_x, 0.42)
+        self.assertAlmostEqual(polygon.label_y, 0.66)
+
+        # …and clearing it again falls back to auto-placement.
+        response = self.client.patch(
+            f"/api/images/polygons/{polygon.id}/",
+            {"label_x": None, "label_y": None},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        polygon.refresh_from_db()
+        self.assertIsNone(polygon.label_x)
+        self.assertIsNone(polygon.label_y)
+
+    def test_new_polygon_has_no_label_position(self):
+        self.auth(self.alice)
+        response = self.client.post(
+            f"/api/images/{self.image.id}/polygons/",
+            {"points": [[0.1, 0.1], [0.5, 0.2], [0.3, 0.6]]},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertIsNone(response.data["label_x"])
+        self.assertIsNone(response.data["label_y"])
+
     def test_cannot_patch_another_users_polygon(self):
         bob_image = AnnotationImage.objects.create(user=self.bob, width=10, height=10)
         polygon = Polygon.objects.create(
