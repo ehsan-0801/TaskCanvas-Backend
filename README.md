@@ -24,8 +24,16 @@ first:
   only the owner can create boards or manage members.
 
 There's also an annotation tool bolted on the side: you upload images and draw
-polygons on them. That part is still scoped per user rather than per team — it
-predates the teams work and I left it as-is.
+shapes on them. Every shape — polygon, rectangle, square, triangle, circle — is
+stored the same way, as a list of points normalised to 0–1 (a circle is just a
+smooth many-sided polygon). That one decision is why the API stayed simple: the
+client can add rectangles and circles without the backend knowing they exist, and
+resizing, zooming and editing all work identically on any shape. A shape also
+carries a label, a colour, and an optional hand-placed label position (`label_x` /
+`label_y`, also 0–1) — null there just means "put it in the middle".
+
+The annotation side is still scoped per user rather than per team. It predates the
+teams work and I left it as-is.
 
 Auth is email + password. Django keys users on `username` by default, so under the
 hood the email doubles as the username and a small custom serializer looks people
@@ -82,13 +90,14 @@ the main one is `demo@example.com` / `demo12345`.
 python manage.py test
 ```
 
-47 tests across the four apps. They cover the email login and refresh flow, task
+49 tests across the four apps. They cover the email login and refresh flow, task
 CRUD with date filtering and the drag-drop reorder, tag scoping, the annotation
-upload (including reading image dimensions with Pillow) and polygon editing, and —
-the part I cared most about — the access rules: a member can't see or touch a board
-they weren't granted, and a non-owner can't create boards or add people. The tests
-always run against a throwaway in-memory SQLite database, never whatever
-`DATABASE_URL` points at, so you can't accidentally wipe real data by running them.
+upload (including reading image dimensions with Pillow), polygon editing and label
+placement, and — the part I cared most about — the access rules: a member can't see
+or touch a board they weren't granted, and a non-owner can't create boards or add
+people. The tests always run against a throwaway in-memory SQLite database, never
+whatever `DATABASE_URL` points at, so you can't accidentally wipe real data by
+running them.
 
 ## The API in one table
 
